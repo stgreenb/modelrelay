@@ -37,10 +37,10 @@
 
 ## 6. HTTP Proxy Support (Issue #11)
 
-- [ ] 6.1 Verify fetch/http client respects HTTP_PROXY env var
-- [ ] 6.2 Verify fetch/http client respects HTTPS_PROXY env var
-- [ ] 6.3 Verify NO_PROXY bypass works for localhost patterns
-- [ ] 6.4 Add proxy documentation to README.md
+- [x] 6.1 Verify fetch/http client respects HTTP_PROXY env var
+- [x] 6.2 Verify fetch/http client respects HTTPS_PROXY env var
+- [x] 6.3 Verify NO_PROXY bypass works for localhost patterns
+- [x] 6.4 Add proxy documentation to README.md
 
 ## 7. Docker and Release
 
