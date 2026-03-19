@@ -20,8 +20,10 @@ import {
 } from '../lib/utils.js'
 import { buildOpenClawProviderConfig } from '../lib/onboard.js'
 import { resolveAutostartExecPath, resolveAutostartNodePath } from '../lib/autostart.js'
-import { getApiKey } from '../lib/config.js'
+import { exportConfigToken, getApiKey, getProviderPingIntervalMs, importConfigToken } from '../lib/config.js'
+import { buildNpmInstallInvocation, buildWindowsPostUpdateRestartCommand, getForcedUpdateVersion, getLocalUpdateTarballPath, getLocalUpdateVersion, isRunningFromSource, shouldStopAutostartBeforeUpdate } from '../lib/update.js'
 import { isQwenOauthAccessTokenValid, pollQwenOauthDeviceToken, resolveQwenCodeOauthAccessToken, startQwenOauthDeviceLogin } from '../lib/qwencodeAuth.js'
+import { toOpenRouterModelMeta, toKiloCodeModelMeta } from '../lib/server.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -41,41 +43,109 @@ function mockResult(overrides = {}) {
   }
 }
 
+function withEnv(overrides, fn) {
+  const previous = {}
+  for (const [key, value] of Object.entries(overrides)) {
+    previous[key] = process.env[key]
+    if (value == null) delete process.env[key]
+    else process.env[key] = value
+  }
+
+  try {
+    return fn()
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value == null) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
+describe('config helpers', () => {
+  it('resolves provider-specific ping intervals', () => {
+    const config = {
+      providers: {
+        nvidia: { pingIntervalMinutes: 5 },
+        qwencode: { pingIntervalMinutes: '10' },
+        openrouter: { pingIntervalMinutes: 0 }, // invalid
+      }
+    }
+
+    assert.equal(getProviderPingIntervalMs(config, 'nvidia'), 5 * 60_000)
+    assert.equal(getProviderPingIntervalMs(config, 'qwencode'), 10 * 60_000)
+    assert.equal(getProviderPingIntervalMs(config, 'openrouter'), 30 * 60_000) // default
+    assert.equal(getProviderPingIntervalMs(config, 'missing'), 30 * 60_000) // default
+  })
+
+  it('exports/imports full config through transfer token', () => {
+    const config = {
+      apiKeys: { nvidia: '  nv-key  ', groq: 'gsk-key' },
+      providers: { nvidia: { enabled: true }, groq: { enabled: false } },
+      bannedModels: ['a', 'b'],
+      autoUpdate: { enabled: true, intervalHours: 12 },
+      minSweScore: 0.45,
+      excludedProviders: ['openrouter'],
+    }
+
+    const token = exportConfigToken(config)
+    assert.equal(token.startsWith('mrconf:v1:'), true)
+
+    const imported = importConfigToken(token)
+    assert.equal(imported.apiKeys.nvidia, 'nv-key')
+    assert.equal(imported.apiKeys.groq, 'gsk-key')
+    assert.equal(imported.providers.groq.enabled, false)
+    assert.deepEqual(imported.bannedModels, ['a', 'b'])
+    assert.equal(imported.autoUpdate.intervalHours, 12)
+    assert.equal(imported.minSweScore, 0.45)
+    assert.deepEqual(imported.excludedProviders, ['openrouter'])
+  })
+
+  it('imports legacy plain-base64 config payloads', () => {
+    const json = JSON.stringify({ apiKeys: { qwencode: 'abc' }, providers: {} })
+    const plainBase64 = Buffer.from(json, 'utf8').toString('base64')
+    const imported = importConfigToken(plainBase64)
+    assert.equal(imported.apiKeys.qwencode, 'abc')
+  })
+})
+
 describe('sources data integrity', () => {
-  it('includes Qwen Code provider', () => {
-    assert.ok(sources.qwencode)
-    assert.equal(sources.qwencode.name, 'Qwen Code')
-    assert.ok(Array.isArray(sources.qwencode.models))
-    assert.ok(sources.qwencode.models.length > 0)
+  it('includes Qwen provider (from FCM)', () => {
+    assert.ok(sources.qwen)
+    assert.equal(sources.qwen.name, 'Alibaba Cloud (DashScope)')
+    assert.ok(Array.isArray(sources.qwen.models))
+    assert.ok(sources.qwen.models.length > 0)
   })
 
   it('has expected provider structure', () => {
     for (const [providerKey, provider] of Object.entries(sources)) {
       assert.equal(typeof providerKey, 'string')
       assert.equal(typeof provider.name, 'string')
-      assert.equal(typeof provider.url, 'string')
+      assert.ok(provider.url === null || typeof provider.url === 'string')
       assert.ok(Array.isArray(provider.models))
     }
   })
 
-  it('provider model tuples have 4 fields', () => {
+  it('provider model tuples have 5 fields (FCM format: id, label, tier, score, ctx)', () => {
     for (const provider of Object.values(sources)) {
       for (const model of provider.models) {
         assert.ok(Array.isArray(model))
-        assert.equal(model.length, 4)
+        assert.equal(model.length, 5, `Expected 5 fields, got ${model.length}`)
         assert.equal(typeof model[0], 'string')
         assert.equal(typeof model[1], 'string')
+        assert.equal(typeof model[2], 'string')
+        assert.equal(typeof model[3], 'string')
+        assert.equal(typeof model[4], 'string')
       }
     }
   })
 
-  it('flat MODELS tuples have 5 fields', () => {
+  it('flat MODELS tuples have 6 fields (id, label, tier, score, ctx, providerKey)', () => {
     for (const model of MODELS) {
       assert.ok(Array.isArray(model))
-      assert.equal(model.length, 5)
+      assert.equal(model.length, 6, `Expected 6 fields, got ${model.length}`)
       assert.equal(typeof model[0], 'string')
       assert.equal(typeof model[1], 'string')
-      assert.equal(typeof model[4], 'string')
+      assert.equal(typeof model[5], 'string')
     }
   })
 
@@ -86,7 +156,7 @@ describe('sources data integrity', () => {
 
   it('has no duplicate provider/model IDs', () => {
     const seen = new Set()
-    for (const [modelId, , , , providerKey] of MODELS) {
+    for (const [modelId, , , , , providerKey] of MODELS) {
       const key = `${providerKey}/${modelId}`
       assert.equal(seen.has(key), false, `Duplicate model key found: ${key}`)
       seen.add(key)
@@ -116,6 +186,49 @@ describe('provider api key resolution', () => {
       if (originalDashScope == null) delete process.env.DASHSCOPE_API_KEY
       else process.env.DASHSCOPE_API_KEY = originalDashScope
     }
+  })
+
+  it('supports KiloCode provider env var override', () => {
+    const original = process.env.KILOCODE_API_KEY
+
+    try {
+      delete process.env.KILOCODE_API_KEY
+      assert.equal(getApiKey({ apiKeys: {} }, 'kilocode'), null)
+
+      process.env.KILOCODE_API_KEY = 'kilocode-env-key'
+      assert.equal(getApiKey({ apiKeys: {} }, 'kilocode'), 'kilocode-env-key')
+
+      assert.equal(getApiKey({ apiKeys: { kilocode: 'file-key' } }, 'kilocode'), 'kilocode-env-key')
+    } finally {
+      if (original == null) delete process.env.KILOCODE_API_KEY
+      else process.env.KILOCODE_API_KEY = original
+    }
+  })
+})
+
+describe('dynamic model score resolution', () => {
+  it('uses scores.js entry for OpenRouter models outside static sources', () => {
+    const model = toOpenRouterModelMeta({
+      id: 'google/gemma-3n-e2b-it:free',
+      name: 'Google: Gemma 3N E2B (free)',
+      context_length: 32768,
+    })
+
+    assert.ok(model)
+    assert.equal(model.intell, 0.45)  // Default fallback when not in scores.js
+    assert.equal(model.isEstimatedScore, true)  // Estimated because not in scores.js
+  })
+
+  it('uses scores.js entry for KiloCode models when payload omits scores', () => {
+    const model = toKiloCodeModelMeta({
+      id: 'google/gemma-3n-e2b-it:free',
+      display_name: 'Gemma 3N E2B',
+      context_length: 32768,
+    })
+
+    assert.ok(model)
+    assert.equal(model.intell, 0.45)  // Default fallback when not in scores.js
+    assert.equal(model.isEstimatedScore, true)  // Estimated because not in scores.js
   })
 })
 
@@ -482,6 +595,18 @@ describe('parseArgs', () => {
     assert.equal(disabled.autoUpdateAction, 'disable')
     assert.equal(disabled.autoUpdateIntervalHours, null)
   })
+
+  it('parses config export/import commands', () => {
+    const exported = parseArgs(argv('config', 'export'))
+    assert.equal(exported.command, 'config')
+    assert.equal(exported.configAction, 'export')
+    assert.equal(exported.configPayload, null)
+
+    const imported = parseArgs(argv('config', 'import', 'mrconf:v1:abc123'))
+    assert.equal(imported.command, 'config')
+    assert.equal(imported.configAction, 'import')
+    assert.equal(imported.configPayload, 'mrconf:v1:abc123')
+  })
 })
 
 describe('parseOpenRouterKeyRateLimit', () => {
@@ -524,6 +649,85 @@ describe('parseOpenRouterKeyRateLimit', () => {
   it('returns null for invalid payloads', () => {
     assert.equal(parseOpenRouterKeyRateLimit(null), null)
     assert.equal(parseOpenRouterKeyRateLimit({ data: {} }), null)
+  })
+})
+
+describe('update restart coordination', () => {
+  it('keeps Unix-like services alive long enough to self-update when restart is deferred', () => {
+    assert.equal(shouldStopAutostartBeforeUpdate(true, 'linux'), false)
+    assert.equal(shouldStopAutostartBeforeUpdate(true, 'darwin'), false)
+  })
+
+  it('still stops background instances for normal updates and Windows handoff', () => {
+    assert.equal(shouldStopAutostartBeforeUpdate(false, 'linux'), true)
+    assert.equal(shouldStopAutostartBeforeUpdate(true, 'win32'), true)
+  })
+})
+
+describe('local update overrides', () => {
+  it('detects local tarball updates and derives the version from the filename', () => {
+    const tarballPath = join(ROOT, 'modelrelay-9.8.7.tgz')
+    writeFileSync(tarballPath, 'placeholder', 'utf8')
+
+    try {
+      withEnv({ MODELRELAY_UPDATE_TARBALL: tarballPath, MODELRELAY_UPDATE_VERSION: null }, () => {
+        assert.equal(getLocalUpdateTarballPath(), tarballPath)
+        assert.equal(getLocalUpdateVersion(), '9.8.7')
+        assert.equal(isRunningFromSource(), false)
+      })
+    } finally {
+      rmSync(tarballPath, { force: true })
+    }
+  })
+
+  it('prefers an explicit local update version override', () => {
+    const tarballPath = join(ROOT, 'modelrelay-build-under-test.tgz')
+    writeFileSync(tarballPath, 'placeholder', 'utf8')
+
+    try {
+      withEnv({ MODELRELAY_UPDATE_TARBALL: tarballPath, MODELRELAY_UPDATE_VERSION: '3.2.1' }, () => {
+        assert.equal(getLocalUpdateVersion(), '3.2.1')
+      })
+    } finally {
+      rmSync(tarballPath, { force: true })
+    }
+  })
+
+  it('accepts a forced update version for simpler local upgrade testing', () => {
+    withEnv({ MODELRELAY_FORCE_UPDATE_VERSION: '9.9.9' }, () => {
+      assert.equal(getForcedUpdateVersion(), '9.9.9')
+    })
+  })
+
+  it('ignores invalid forced update versions', () => {
+    withEnv({ MODELRELAY_FORCE_UPDATE_VERSION: 'next-build' }, () => {
+      assert.equal(getForcedUpdateVersion(), null)
+    })
+  })
+})
+
+describe('npm install invocation', () => {
+  it('builds a shell-safe Windows npm command for local tarballs', () => {
+    const tarballPath = join(ROOT, 'modelrelay-1.8.4.tgz')
+    writeFileSync(tarballPath, 'placeholder', 'utf8')
+
+    try {
+      withEnv({ MODELRELAY_UPDATE_TARBALL: tarballPath }, () => {
+        const invocation = buildNpmInstallInvocation('latest', 'win32')
+        assert.equal(invocation.command, 'npm')
+        assert.deepEqual(invocation.args, ['install', '-g', tarballPath])
+        assert.equal(invocation.shell, true)
+      })
+    } finally {
+      rmSync(tarballPath, { force: true })
+    }
+  })
+})
+
+describe('post-update restart command', () => {
+  it('restarts the autostart target only when autostart is configured', () => {
+    assert.equal(buildWindowsPostUpdateRestartCommand(true), 'timeout /t 2 /nobreak && modelrelay start --autostart')
+    assert.equal(buildWindowsPostUpdateRestartCommand(false), 'timeout /t 2 /nobreak && modelrelay')
   })
 })
 

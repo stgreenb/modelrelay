@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  mrx:
+    build: .
+    container_name: mrx
+    ports:
+      - "7352:7352"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7352/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

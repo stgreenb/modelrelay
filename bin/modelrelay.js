@@ -5,11 +5,12 @@
  */
 
 import { parseArgs } from '../lib/utils.js'
-import { loadConfig, saveConfig } from '../lib/config.js'
+import { loadConfig, saveConfig, exportConfigToken, importConfigToken } from '../lib/config.js'
 import { runOnboard } from '../lib/onboard.js'
 import { getAutostartStatus, installAutostart, startAutostart, uninstallAutostart } from '../lib/autostart.js'
 import { getPreferredLanIpv4Address } from '../lib/network.js'
 import { runUpdateCommand } from '../lib/update.js'
+import chalk from 'chalk'
 
 function printHelp() {
   console.log('modelrelay')
@@ -22,6 +23,9 @@ function printHelp() {
   console.log('  modelrelay uninstall --autostart')
   console.log('  modelrelay status --autostart')
   console.log('  modelrelay update')
+  console.log('  modelrelay refresh-scores')
+  console.log('  modelrelay config export')
+  console.log('  modelrelay config import <token>')
   console.log('  modelrelay autoupdate [--enable|--disable|--status] [--interval <hours>]')
   console.log('  modelrelay autostart [--install|--start|--uninstall|--status]')
   console.log('')
@@ -40,6 +44,14 @@ function printHelp() {
   console.log('  --disable          For autoupdate subcommand: disable auto-update')
   console.log('  --interval <hours> For autoupdate subcommand: check interval (default: 24)')
   console.log('  --help, -h         Show help')
+}
+
+async function readStdin() {
+  const chunks = []
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks.map(c => Buffer.isBuffer(c) ? c : Buffer.from(c))).toString('utf8')
 }
 
 function runAutoUpdateAction(action, intervalHours) {
@@ -166,6 +178,52 @@ async function main() {
     }
 
     console.error(result.message)
+    process.exit(1)
+  }
+
+  if (cliArgs.command === 'refresh-scores') {
+    const config = loadConfig();
+    const { getModelsNeedingScores } = await import('../lib/score-fetcher.js');
+    const needing = await getModelsNeedingScores(config);
+    if (needing.length === 0) {
+      console.log(chalk.green('✔ All models have verified scores in scores.js.'));
+    } else {
+      console.log(chalk.yellow(`Found ${needing.length} models needing SWE-bench scores:`));
+      needing.forEach(m => console.log(chalk.dim(` - ${m}`)));
+      console.log('\nPlease provide this list to Gemini to search for verified scores.');
+    }
+    return;
+  }
+
+  if (cliArgs.command === 'config') {
+    if (cliArgs.configAction === 'export') {
+      const config = loadConfig()
+      console.log(exportConfigToken(config))
+      return
+    }
+
+    if (cliArgs.configAction === 'import') {
+      let payload = cliArgs.configPayload
+      if (!payload && !process.stdin.isTTY) {
+        payload = (await readStdin()).trim()
+      }
+      if (!payload) {
+        console.error('Missing config token. Use: modelrelay config import <token> (or pipe token via stdin).')
+        process.exit(1)
+      }
+
+      try {
+        const imported = importConfigToken(payload)
+        saveConfig(imported)
+        console.log('Configuration imported successfully.')
+      } catch (err) {
+        console.error(`Failed to import configuration: ${err?.message || 'Invalid token.'}`)
+        process.exit(1)
+      }
+      return
+    }
+
+    console.error('Usage: modelrelay config export | modelrelay config import <token>')
     process.exit(1)
   }
 

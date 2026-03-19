@@ -1,34 +1,161 @@
-# modelrelay
+# MRX (Model Relay Extended)
 
-OpenAI-compatible local router that benchmarks free coding models across providers and forwards requests to the best available model.
+Fork of modelrelay - OpenAI-compatible local router with iflow.cn, g4f proxy, and intelligent routing filters.
+
+## Features
+
+- **Free Model Routing**: Route requests to free LLM providers based on latency, uptime, and availability
+- **FCM Integration**: Built-in sync with Free Coding Models (FCM) for 19+ providers with Stability Scores
+- **HTTP Proxy Support**: Respects HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables
+- **Custom Providers**: Includes g4f, g4f_deepinfra, and iflow providers
+- **OAuth Support**: Qwen Code OAuth authentication
+- **Auto-Update**: Automatic updates and restart coordination
 
 ## Install
 
 ```bash
-npm install -g modelrelay
+cd mrx
+npm install
 ```
+
+## Syncing with Free Coding Models (FCM)
+
+MRX syncs with [free-coding-models](https://github.com/vava-nessa/free-coding-models) to get the latest providers and models.
+
+```bash
+# Sync FCM sources (downloads latest sources.js and merges MRX custom providers)
+pnpm run sync-fcm
+
+# Or using npm
+npm run sync-fcm
+```
+
+This will:
+1. Download the latest `sources.js` from FCM
+2. Merge in MRX custom providers (g4f, iflow, g4f_deepinfra)
+3. Generate updated `scores.js` with tier/SWE scores
 
 ## Quick Start
 
 ```bash
-# 1) Onboard: save provider API keys and optionally auto-configure integrations
-modelrelay onboard
+# Start with pm2 (recommended for background)
+pm2 start ecosystem.config.cjs
 
-# 2) Start the local router (default port 7352)
-modelrelay
+# Or run directly
+node bin/modelrelay.js --port 7352
 ```
 
-Router endpoint:
+## PM2 Commands
+
+```bash
+# Start MRX (recommended)
+pm2 start ecosystem.config.cjs
+
+# Or with inline options
+pm2 start bin/modelrelay.js --name mrx -- --port 7352
+
+# View logs
+pm2 logs mrx
+
+# Restart
+pm2 restart mrx
+
+# Stop
+pm2 stop mrx
+
+# Delete
+pm2 delete mrx
+```
+
+## Router Endpoint
 
 - Base URL: `http://127.0.0.1:7352/v1`
-- API key: any string
-- Model: `auto-fastest` (router picks actual backend)
+- API key: any string (ignored)
+- Model: `auto-fastest` (router picks best available)
 
-## OpenCode Quick Start
+## New Providers in MRX
 
-`modelrelay onboard` can auto-configure OpenCode.
+| Provider | Models | Latency | Notes |
+|----------|--------|---------|-------|
+| **iflow.cn** | 15 | ~900ms | Primary - reliable |
+| **g4f Proxy** | 7 | 500-4000ms | Supplementary - flaky |
+| nvidia NIM | 44 | 400-2000ms | Original |
+| groq | 10 | 300-500ms | Original |
 
-If you want manual setup, put this in `~/.config/opencode/opencode.json`:
+## Routing Filters
+
+Edit `~/.modelrelay.json`:
+
+```json
+{
+  "filters": {
+    "maxPingMs": 1200,
+    "minContextTokens": 100000,
+    "minIntell": 0.70
+  },
+  "minSweScore": 0.50
+}
+```
+
+| Filter | Default | Description |
+|--------|---------|-------------|
+| `maxPingMs` | 1200 | Skip models slower than this (ms) - still pings but doesn't route |
+| `minContextTokens` | 100000 | Skip models with smaller context |
+| `minIntell` | 0.70 | Skip models with lower SWE score - still pings but doesn't route |
+| `minSweScore` | null | 1.9.0 built-in - excludes models below threshold from pinging AND routing |
+
+## Config
+
+Config file: `~/.modelrelay.json`
+
+```json
+{
+  "apiKeys": {
+    "nvidia": "nvapi-...",
+    "iflow": "your-iflow-key",
+    "groq": "gsk_..."
+  },
+  "filters": {
+    "maxPingMs": 1200,
+    "minContextTokens": 100000,
+    "minIntell": 0.70
+  },
+  "minSweScore": 0.50,
+  "excludedProviders": [],
+  "apiKeyExpiry": {
+    "iflow": "2026-03-07"
+  }
+}
+```
+
+### API Key Environment Variables
+- `NVIDIA_API_KEY`
+- `IFLOW_API_KEY`
+- `GROQ_API_KEY`
+- `CEREBRAS_API_KEY`
+- `OPENROUTER_API_KEY`
+- `CODESTRAL_API_KEY`
+- `SCALEWAY_API_KEY`
+- `QWEN_CODE_API_KEY` (or `DASHSCOPE_API_KEY`)
+- `GOOGLE_API_KEY`
+
+### API Key Expiry
+iflow keys expire every 7 days. Add expiry date to config to get warnings:
+
+```json
+"apiKeyExpiry": {
+  "iflow": "2026-03-07"
+}
+```
+
+## Notes
+
+- Auto-update is **disabled** (this is a local fork, not published to npm)
+- g4f proxy is supplementary - use when primary providers are slow/unavailable
+- Models below minIntell (0.70) are not pinged to reduce traffic
+- Slow models are dynamically filtered - they return when they speed up
+
+## OpenCode Config
 
 ```json
 {
@@ -36,14 +163,18 @@ If you want manual setup, put this in `~/.config/opencode/opencode.json`:
   "provider": {
     "router": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "modelrelay",
+      "name": "mrx",
       "options": {
         "baseURL": "http://127.0.0.1:7352/v1",
         "apiKey": "dummy-key"
       },
       "models": {
         "auto-fastest": {
-          "name": "Auto Fastest"
+          "name": "Auto Fastest",
+          "limit": {
+            "context": 100000,
+            "output": 65536
+          }
         }
       }
     }
@@ -51,81 +182,3 @@ If you want manual setup, put this in `~/.config/opencode/opencode.json`:
   "model": "router/auto-fastest"
 }
 ```
-
-## OpenClaw Quick Start
-
-`modelrelay onboard` can auto-configure OpenClaw.
-
-If you want manual setup, merge this into `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "models": {
-    "providers": {
-      "modelrelay": {
-        "baseUrl": "http://127.0.0.1:7352/v1",
-        "api": "openai-completions",
-        "apiKey": "no-key",
-        "models": [
-          { "id": "auto-fastest", "name": "Auto Fastest" }
-        ]
-      }
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "modelrelay/auto-fastest"
-      },
-      "models": {
-        "modelrelay/auto-fastest": {}
-      }
-    }
-  }
-}
-```
-
-## CLI
-
-```bash
-modelrelay [--port <number>] [--log] [--ban <model1,model2>]
-modelrelay onboard [--port <number>]
-modelrelay install --autostart
-modelrelay start --autostart
-modelrelay uninstall --autostart
-modelrelay status --autostart
-modelrelay update
-modelrelay autoupdate [--enable|--disable|--status] [--interval <hours>]
-modelrelay autostart [--install|--start|--uninstall|--status]
-```
-
-Request terminal logging is disabled by default. Use `--log` to enable it.
-
-`modelrelay install --autostart` also triggers an immediate start attempt so you do not need a separate command after install.
-
-During `modelrelay onboard`, you will also be prompted to enable auto-start on login.
-
-`modelrelay update` upgrades the global npm package and, when autostart is configured, stops the background service first and starts it again after the update.
-
-Auto-update is enabled by default. While the router is running, modelrelay checks npm periodically (default: every 24 hours) and applies updates automatically.
-
-Use `modelrelay autoupdate --status` to inspect state, `modelrelay autoupdate --disable` to turn it off, and `modelrelay autoupdate --enable --interval 12` to re-enable with a custom interval.
-
-## Config
-
-- Router config file: `~/.modelrelay.json`
-- API key env overrides:
-  - `NVIDIA_API_KEY`
-  - `GROQ_API_KEY`
-  - `CEREBRAS_API_KEY`
-  - `SAMBANOVA_API_KEY`
-  - `OPENROUTER_API_KEY`
-  - `CODESTRAL_API_KEY`
-  - `HYPERBOLIC_API_KEY`
-  - `SCALEWAY_API_KEY`
-  - `QWEN_CODE_API_KEY` (or `DASHSCOPE_API_KEY`)
-  - `GOOGLE_API_KEY`
-
-For `Qwen Code`, modelrelay supports both API keys and Qwen OAuth cached credentials (`~/.qwen/oauth_creds.json`).
-If OAuth credentials exist, modelrelay will use them and refresh access tokens automatically.
-You can also start OAuth directly from the Web UI Providers tab using `Login with Qwen Code`.
