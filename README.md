@@ -1,4 +1,4 @@
-# mrx
+# modelrelay-docker
 
 Thin wrapper that builds and publishes Docker images of [modelrelay](https://github.com/ellipticmarketing/modelrelay) releases to GHCR.
 
@@ -14,11 +14,11 @@ Thin wrapper that builds and publishes Docker images of [modelrelay](https://git
 Pull with:
 
 ```bash
-docker pull ghcr.io/stevex/mrx:<version>
+docker pull ghcr.io/stgreenb/modelrelay:<version>
 ```
 
 Run with:
 
 ```bash
-docker run -d -p 7352:7352 ghcr.io/stevex/mrx:<version>
+docker run -d -p 7352:7352 ghcr.io/stgreenb/modelrelay:<version>
 ```
