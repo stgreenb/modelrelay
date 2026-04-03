@@ -1,58 +1,6 @@
 {
   "name": "mrx",
-  "version": "2.0.0",
-  "description": "MRX (Model Relay Extended) - Fork of modelrelay with g4f/iflow providers and custom filters.",
-  "keywords": [
-    "modelrelay",
-    "mrx",
-    "nvidia",
-    "nim",
-    "llm",
-    "cli",
-    "ai",
-    "models",
-    "benchmark",
-    "latency",
-    "availability",
-    "g4f",
-    "iflow"
-  ],
-  "homepage": "https://github.com/stevex/mrx#readme",
-  "bugs": {
-    "url": "https://github.com/stevex/mrx/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/modelrelay.git"
-  },
-  "license": "MIT",
-  "author": "stevex",
-  "type": "module",
-  "main": "bin/modelrelay.js",
-  "bin": {
-    "modelrelay": "./bin/modelrelay.js",
-    "mrx": "./bin/modelrelay.js"
-  },
-  "files": [
-    "bin/",
-    "lib/",
-    "public/",
-    "sources.js",
-    "scores.js",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "start": "node bin/modelrelay.js",
-    "test": "node --test test/test.js",
-    "sync-fcm": "node scripts/sync-fcm.js"
-  },
-  "dependencies": {
-    "chalk": "^5.4.1",
-    "express": "^5.2.1",
-    "https-proxy-agent": "^7.0.5"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "version": "1.0.0",
+  "description": "Docker image builder for modelrelay releases",
+  "license": "MIT"
 }

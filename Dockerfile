@@ -1,19 +1,17 @@
-FROM node:20-alpine
+FROM node:24-alpine
+
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
-RUN apk add --no-cache tini
-
-COPY package.json pnpm-lock.yaml ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile --prod
+COPY package*.json ./
+RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 
 COPY . .
 
-ENV NODE_ENV=production
-
 EXPOSE 7352
 
-USER node
+ENV NODE_ENV=production
 
-ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "bin/modelrelay.js"]
+ENTRYPOINT ["node", "bin/modelrelay.js"]
+CMD ["start"]
