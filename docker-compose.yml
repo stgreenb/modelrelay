@@ -7,11 +7,15 @@ services:
       - "7352:7352"
     volumes:
       - modelrelay_config:/app/config
+      # To use score overrides via config file, mount your score-overrides.json:
+      # - ./score-overrides.json:/app/config/score-overrides.json:ro
     environment:
       - NODE_ENV=production
       - HOME=/app/config
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
+      # To use score overrides via environment variable (alternative to config file):
+      # - MODELRELAY_SCORE_OVERRIDES={"deepseek-ai/deepseek-v4": 0.73}
 volumes:
   modelrelay_config:
