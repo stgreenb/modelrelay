@@ -60,11 +60,15 @@ Config file takes precedence over environment variable if both are set.
 
 This project uses a GitHub Actions-driven patching strategy:
 
-1. Modified files are stored in `custom-overrides/` directory
-2. During build, upstream modelrelay is downloaded and extracted
-3. Files from `custom-overrides/` copy over upstream equivalents
-4. `scores.js` is NEVER modified — upstream score updates flow through automatically
+1. Upstream modelrelay is downloaded and extracted into `build-context/`
+2. `scripts/patch-sources.js` injects a score-override hook into the upstream `sources.js` (import + override-first check in `getScore()`). It verifies the expected function shape and **fails the build** if upstream changed it
+3. `custom-overrides/lib/score-overrides.js` (the override-handling module) is copied in — this is the only file we ship
+4. `scripts/validate-score-overrides.js` fails the build if any override entry is already covered by the static `scores.js`/alias map
+5. `scores.js` and the rest of `sources.js` are NEVER maintained locally — upstream score/model data flows through automatically on every release
 
-Only these files are overridden:
-- `sources.js` — modified to check overrides first
-- `lib/score-overrides.js` — new module for override handling
+The patched `getScore()` checks `score-overrides.json` / `MODELRELAY_SCORE_OVERRIDES` first. Since 1.19, live OpenRouter catalog data takes precedence over the override at runtime; see `docs/override-behavior.md` for the full resolution order.
+
+Files maintained locally:
+- `custom-overrides/lib/score-overrides.js` — override handling module
+- `score-overrides.json` — static override values (only models missing upstream)
+- `scripts/` — patch + validation scripts

@@ -22,9 +22,11 @@ function parseScoreOverrides() {
       const content = readFileSync(CONFIG_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(content);
       populateOverrideMap(parsed);
+      logOverrideState('config file');
       return overrideMap;
     } catch (e) {
       console.warn('[score-overrides] Invalid JSON in config file, using empty overrides');
+      logOverrideState('config file');
       return overrideMap;
     }
   }
@@ -39,7 +41,12 @@ function parseScoreOverrides() {
     }
   }
 
+  logOverrideState('env var');
   return overrideMap;
+}
+
+function logOverrideState(source) {
+  console.log(`[score-overrides] Hook active, ${overrideMap.size} override(s) from ${source}`);
 }
 
 function populateOverrideMap(obj) {

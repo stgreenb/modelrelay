@@ -2,5 +2,6 @@
   "name": "mrx",
   "version": "1.0.0",
   "description": "Docker image builder for modelrelay releases",
-  "license": "MIT"
+  "license": "MIT",
+  "type": "module"
 }

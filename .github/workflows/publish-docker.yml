@@ -30,13 +30,19 @@ jobs:
           mkdir -p build-context
           tar -xzf modelrelay.tar.gz -C build-context --strip-components=1
 
-      - name: Apply custom overrides
+      - name: Inject score-overrides hook into upstream sources.js
+        run: node scripts/patch-sources.js build-context/sources.js
+
+      - name: Validate score-overrides.json has no covered entries
+        run: node scripts/validate-score-overrides.js build-context/sources.js build-context/scores.js
+
+      - name: Apply additive custom overrides
         run: |
-          if [ -d "custom-overrides" ]; then
-            cp -r custom-overrides/* build-context/
-            echo "Applied custom-overrides files"
+          if [ -d "custom-overrides/lib" ]; then
+            cp -r custom-overrides/lib build-context/
+            echo "Applied custom-overrides/lib files"
           else
-            echo "No custom-overrides directory, skipping"
+            echo "No custom-overrides/lib directory, skipping"
           fi
 
       - name: Copy Dockerfile
